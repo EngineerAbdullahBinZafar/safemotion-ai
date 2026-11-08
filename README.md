@@ -18,7 +18,7 @@ When generative AI models (Claude, ChatGPT, Gemini, VLA models) output motion co
 
 SafeMotion AI sits between your AI reasoning layer and physical robot actuators:
 - **Sub-50µs Execution**: Evaluates closed-form Control Barrier Functions (CBF-QP) at **> 20,000 Hz**.
-- **Deterministic Forward Invariance**: Strictly guarantees $h(\mathbf{x}) \ge 0$ (no collision) via Nagumo's Theorem and Ames et al.
+- **Deterministic Forward Invariance**: Enforces continuous-time forward invariance $h(\mathbf{x}) \ge 0$ under standard unicycle kinematic assumptions via Nagumo's Theorem and Ames et al.
 - **Dual API Access**: Run as a **REST API** (FastAPI) or connect directly as a **Model Context Protocol (MCP)** tool for Claude Desktop and Antigravity IDE.
 
 ---
@@ -149,13 +149,17 @@ safemotion-ai/tests/test_mcp_bridge.py::test_mcp_verify_trajectory_handler PASSE
 
 ---
 
-## 💰 Monetization & Payout Blueprint (Pakistan Direct to UBL)
+## 💼 Enterprise Licensing & Commercial Tiers
 
-SafeMotion AI includes a complete financial and payout architecture documented in [`docs/PAKISTAN_UBL_CASHFLOW_GUIDE.md`](docs/PAKISTAN_UBL_CASHFLOW_GUIDE.md):
-- **Merchant of Record (LemonSqueezy / Polar.sh)**: Automatically collects global sales tax and VAT.
-- **Payoneer Virtual US Account**: Payouts deposited automatically.
-- **United Bank Limited (UBL) Pakistan Direct**: 1-click transfer directly into your UBL IBAN at SBP mid-market exchange rates.
-- **FBR Concessionary Tax**: Fully compliant under Section 154A of the Income Tax Ordinance (0.25% export tax with PSEB registration or 1.0% without PSEB).
+SafeMotion AI offers commercial licensing and managed cloud safety gateways for autonomous robotics teams:
+
+| Tier | Price | Monthly Quota | Key Capabilities |
+| :--- | :--- | :--- | :--- |
+| **Developer Free** | **$0** / month | 1,000 evaluations | Community support, sub-50µs local solver, REST API & MCP access |
+| **Pro Production** | **$39** / month | 100,000 evaluations | Multi-obstacle CBF-QP, priority SLA (<10ms cloud), crash analytics dashboard |
+| **Enterprise On-Prem** | **$999** one-time | Unlimited | Hardened Docker container, AUTOSAR E2E Profile 1 CAN framing, dedicated SLA |
+
+For enterprise licensing and integration inquiries, contact [abz.king.1.9.2003@gmail.com](mailto:abz.king.1.9.2003@gmail.com).
 
 ---
 
