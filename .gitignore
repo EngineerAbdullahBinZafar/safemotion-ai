@@ -1,7 +1,3 @@
-# Security & Financial Exclusions
-docs/PAKISTAN_UBL_CASHFLOW_GUIDE.md
-*UBL*
-
 # Python & Environment
 __pycache__/
 *.py[cod]
