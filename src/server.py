@@ -8,6 +8,13 @@ from typing import Dict
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
+from dotenv import find_dotenv, load_dotenv
+
+# Load environment variables (.env) at startup
+_env_path = find_dotenv(usecwd=True)
+if _env_path:
+    load_dotenv(_env_path)
+
 from .cbf_core import CBFSafetyFilter
 from .config import settings
 from .models import (
@@ -17,6 +24,7 @@ from .models import (
     TrajectoryVerifyRequest,
     TrajectoryVerifyResponse,
 )
+from .polar_routes import router as polar_router
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -34,6 +42,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Polar Payment & Webhook endpoints
+app.include_router(polar_router)
+
 
 # Shared singleton solver instance
 _filter_engine = CBFSafetyFilter(
