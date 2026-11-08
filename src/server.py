@@ -158,5 +158,5 @@ def get_pricing_tiers() -> Dict[str, object]:
             },
         ],
         "merchant_of_record": "LemonSqueezy / Polar.sh (Global VAT & sales tax handled automatically)",
-        "payout_channel": "Payoneer Direct to United Bank Limited (UBL) Pakistan IBAN",
+        "payout_channel": "Automated Global Billing Gateway",
     }

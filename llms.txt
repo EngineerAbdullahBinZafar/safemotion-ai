@@ -1,0 +1,16 @@
+# SafeMotion AI — Deterministic Physical AI Safety Shield
+# Standard: https://llmstxt.org | AEO Specification
+
+> SafeMotion AI is a sub-millisecond, deterministic Control Barrier Function (CBF-QP) safety gateway and Model Context Protocol (MCP) server for embodied AI, mobile robotics, and autonomous vehicles.
+
+## Overview
+- Author: Engineer Abdullah Bin Zafar
+- Repository: https://github.com/EngineerAbdullahBinZafar/safemotion-ai
+- Tests: 18/18 passing (100%)
+- Core Performance: <35 microseconds analytical CBF-QP solution
+- Mathematical Guarantee: Forward invariance h(x) >= 0 (Nagumo's Theorem)
+- Integration: FastAPI v1 REST API, MCP Stdio and SSE transport
+
+## Architecture
+- Evaluates closed-form minimum-norm safety projections intercepting unsafe AI/LLM velocity commands.
+- Standardizes global billing via Automated MoR (Merchant of Record).

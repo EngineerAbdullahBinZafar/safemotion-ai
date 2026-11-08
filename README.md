@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/banner.png" alt="SafeMotion AI — Sub-millisecond Deterministic CBF-QP Safety Shield & MCP Gateway for Robotics by Engineer Abdullah Bin Zafar" width="100%" />
+</p>
+
 # 🛡️ SafeMotion AI — Deterministic Physical AI Safety Shield
 
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)

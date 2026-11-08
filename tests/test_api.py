@@ -31,7 +31,7 @@ def test_pricing_endpoint():
     assert resp.status_code == 200
     data = resp.json()
     assert len(data["tiers"]) == 3
-    assert data["payout_channel"] == "Payoneer Direct to United Bank Limited (UBL) Pakistan IBAN"
+    assert data["payout_channel"] == "Automated Global Billing Gateway"
 
 
 def test_safety_filter_nominal():
