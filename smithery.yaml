@@ -1,0 +1,16 @@
+# Smithery configuration for SafeMotion AI MCP Server
+# Reference: https://smithery.ai/docs/config#smitheryyaml
+
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      gamma:
+        type: number
+        description: "Control Barrier Function Class K decay factor gamma"
+        default: 1.8
+  commandFunction:
+    - python
+    - -m
+    - src.mcp_bridge
