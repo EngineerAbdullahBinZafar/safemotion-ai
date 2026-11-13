@@ -113,3 +113,55 @@ def test_trajectory_verification_collision_detected(cbf_filter):
     assert res["certified"] is False
     assert res["collision_detected"] is True
     assert res["time_to_collision_s"] is not None
+
+
+def test_multi_obstacle_joint_cbf_and_box_satisfaction(cbf_filter):
+    # Regression test for Round 1 counterexample: both obstacle halfspaces & box bounds must hold
+    state = (0.35, 0.02, 0.0)
+    u_ai = (1.5, -2.0)
+    obstacles = [(1.0, 0.45, 0.4), (1.0, -0.45, 0.4)]
+
+    res = cbf_filter.filter_control(state=state, u_ai=u_ai, obstacles=obstacles)
+    v_safe, omega_safe = res["u_safe"]
+
+    assert res["is_safe"] is True
+    assert res["forward_invariant"] is True
+    assert res["kkt_slack"] == 0.0
+    assert cbf_filter.v_min - 1e-9 <= v_safe <= cbf_filter.v_max + 1e-9
+    assert abs(omega_safe) <= cbf_filter.omega_max + 1e-9
+
+    px, py, theta = state
+    cos_t, sin_t = math.cos(theta), math.sin(theta)
+    for ox, oy, orad in obstacles:
+        h = cbf_filter.compute_barrier(px, py, ox, oy, orad)
+        a_v = 2.0 * ((px - ox) * cos_t + (py - oy) * sin_t)
+        lhs = a_v * v_safe  # exact L_g h(x) * u since L_g_omega h(x) == 0
+        b = -cbf_filter.gamma * h
+        assert lhs >= b - 1e-6, f"CBF violated for {(ox, oy)}: lhs={lhs} < b={b}"
+
+
+def test_infeasible_opposing_obstacles_reports_not_forward_invariant(cbf_filter):
+    # Opposing obstacles overlapping robot position create contradictory CBF constraints
+    state = (0.0, 0.0, 0.0)
+    obstacles = [(0.3, 0.0, 0.4), (-0.3, 0.0, 0.4)]
+    res = cbf_filter.filter_control(state=state, u_ai=(1.0, 0.5), obstacles=obstacles)
+
+    v_safe, omega_safe = res["u_safe"]
+    assert res["is_safe"] is False
+    assert res["forward_invariant"] is False
+    assert res["kkt_slack"] > 0.0
+    assert cbf_filter.v_min - 1e-9 <= v_safe <= cbf_filter.v_max + 1e-9
+    assert abs(omega_safe) <= cbf_filter.omega_max + 1e-9
+
+
+def test_out_of_bounds_nominal_clamped_even_with_safe_obstacle(cbf_filter):
+    # Obstacle behind robot -> CBF safe, yet nominal exceeds actuator limits
+    res = cbf_filter.filter_control(
+        state=(0.0, 0.0, 0.0),
+        u_ai=(5.0, -8.0),
+        obstacles=[(-2.0, 0.0, 0.25)],
+    )
+    v_safe, omega_safe = res["u_safe"]
+    assert abs(v_safe - cbf_filter.v_max) < 1e-9
+    assert abs(omega_safe - (-cbf_filter.omega_max)) < 1e-9
+    assert res["forward_invariant"] is True

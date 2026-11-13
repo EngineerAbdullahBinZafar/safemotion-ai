@@ -58,6 +58,80 @@ class CBFSafetyFilter:
         safe_radius = self.r_min + obs_radius
         return dist_sq - (safe_radius * safe_radius)
 
+    @staticmethod
+    def _solve_2d_with_shift(
+        v_nom: float,
+        w_nom: float,
+        v_min: float,
+        v_max: float,
+        w_min: float,
+        w_max: float,
+        raw_cs: List[Tuple[float, float, float]],
+        delta: float,
+    ) -> Tuple[bool, Tuple[float, float]]:
+        hps: List[Tuple[float, float, float]] = [
+            (1.0, 0.0, v_min),
+            (-1.0, 0.0, -v_max),
+            (0.0, 1.0, w_min),
+            (0.0, -1.0, -w_max),
+        ]
+        normed_cbfs: List[Tuple[float, float, float]] = []
+        for a0, a1, b in raw_cs:
+            b_shift = b - delta
+            n = math.hypot(a0, a1)
+            if n <= 1e-12:
+                if b_shift > 1e-9:
+                    return False, (0.0, 0.0)
+            else:
+                normed_cbfs.append((a0 / n, a1 / n, b_shift / n))
+
+        uv = max(v_min, min(v_max, v_nom))
+        uw = max(w_min, min(w_max, w_nom))
+
+        for n0, n1, d in normed_cbfs:
+            if n0 * uv + n1 * uw < d - 1e-12:
+                s_nom = n0 * v_nom + n1 * w_nom
+                pv = v_nom + (d - s_nom) * n0
+                pw = w_nom + (d - s_nom) * n1
+                dv, dw = -n1, n0
+                t_min = -float("inf")
+                t_max = float("inf")
+                for m0, m1, dm in hps:
+                    alpha = m0 * dv + m1 * dw
+                    beta = dm - (m0 * pv + m1 * pw)
+                    if alpha > 1e-11:
+                        val = beta / alpha
+                        if val > t_min:
+                            t_min = val
+                    elif alpha < -1e-11:
+                        val = beta / alpha
+                        if val < t_max:
+                            t_max = val
+                    else:
+                        if beta > 1e-9:
+                            return False, (uv, uw)
+
+                if t_min > t_max + 1e-9:
+                    return False, (uv, uw)
+                if t_min > t_max:
+                    t_opt = 0.5 * (t_min + t_max)
+                else:
+                    t_opt = 0.0
+                    if t_opt < t_min:
+                        t_opt = t_min
+                    if t_opt > t_max:
+                        t_opt = t_max
+                uv = pv + t_opt * dv
+                uw = pw + t_opt * dw
+            hps.append((n0, n1, d))
+
+        uv = max(v_min, min(v_max, uv))
+        uw = max(w_min, min(w_max, uw))
+        for a0, a1, b in raw_cs:
+            if a0 * uv + a1 * uw < b - delta - 1e-6:
+                return False, (uv, uw)
+        return True, (uv, uw)
+
     def filter_control(
         self,
         state: Tuple[float, float, float],
@@ -66,14 +140,14 @@ class CBFSafetyFilter:
         gamma: Optional[float] = None,
     ) -> Dict[str, object]:
         """
-        Executes real-time safety projection.
-        
+        Executes real-time safety projection across all obstacle CBF and actuator constraints.
+
         Args:
             state: (px, py, theta) in meters and radians.
             u_ai: (v, omega) proposed by LLM or planner.
             obstacles: List of (obs_x, obs_y, obs_radius).
             gamma: Optional override for class-K barrier aggressiveness parameter.
-            
+
         Returns:
             Dictionary containing certified u_safe, barrier values, and solver metrics.
         """
@@ -81,91 +155,112 @@ class CBFSafetyFilter:
         active_gamma = gamma if gamma is not None else self.gamma
 
         px, py, theta = state
-        v_des, omega_des = u_ai
+        v_des = float(u_ai[0])
+        omega_des = float(u_ai[1])
 
-        # Clamp desired input to hardware actuator limits first
         v_clamped = max(self.v_min, min(self.v_max, v_des))
         omega_clamped = max(-self.omega_max, min(self.omega_max, omega_des))
 
         if not obstacles:
             t_end = time.perf_counter_ns()
             return {
-                "u_safe": (v_clamped, omega_clamped),
+                "u_safe": (float(v_clamped), float(omega_clamped)),
                 "is_safe": True,
                 "forward_invariant": True,
                 "min_barrier_h": 999.0,
-                "attenuation_ratio": 1.0,
+                "attenuation_ratio": 1.0 if math.hypot(v_des, omega_des) < 1e-9 else round(
+                    min(1.0, math.hypot(v_clamped, omega_clamped) / max(math.hypot(v_des, omega_des), 1e-6)),
+                    4,
+                ),
                 "solver_latency_us": round((t_end - t_start) / 1000.0, 2),
                 "kkt_slack": 0.0,
             }
 
-        # Evaluate barriers and Lie derivatives across all obstacle constraints
         cos_t = math.cos(theta)
         sin_t = math.sin(theta)
 
         min_h = float("inf")
-        most_critical_constraint = None
+        raw_cs: List[Tuple[float, float, float]] = []
 
         for obs_x, obs_y, obs_r in obstacles:
             dx = px - obs_x
             dy = py - obs_y
             h = self.compute_barrier(px, py, obs_x, obs_y, obs_r)
-
             if h < min_h:
                 min_h = h
 
-            # Lie derivative L_g h(x) = ∇h(x)^T * g(x)
-            # g(x) = [cos(theta), 0; sin(theta), 0; 0, 1]
-            # ∇h_p = [2*dx, 2*dy, 0]
-            # L_f h(x) = 0 (driftless kinematic unicycle)
+            # Exact Lie derivative of h(px, py) = ||p - p_obs||^2 - r_safe^2
+            # under unicycle dynamics g(x) = [cos(theta), 0; sin(theta), 0; 0, 1]:
+            # L_f h(x) = 0, L_g h(x) = [2*(dx*cos_t + dy*sin_t), 0.0]
             a_v = 2.0 * (dx * cos_t + dy * sin_t)
-            
-            # Distance from robot forward line to obstacle for rotational avoidance
-            # cross product gives lateral offset
-            lateral_offset = -dx * sin_t + dy * cos_t
-            a_omega = 0.5 * lateral_offset
-
+            a_omega = 0.0
             b = -active_gamma * h
+            raw_cs.append((a_v, a_omega, b))
 
-            # Check constraint violation: a_v * v + a_omega * omega >= b
-            lhs = a_v * v_clamped + a_omega * omega_clamped
-            if lhs < b:
-                violation = b - lhs
-                if most_critical_constraint is None or violation > most_critical_constraint["violation"]:
-                    most_critical_constraint = {
-                        "a_v": a_v,
-                        "a_omega": a_omega,
-                        "b": b,
-                        "h": h,
-                        "violation": violation,
-                    }
+        # Fast check: if box-clamped u_ai satisfies all CBF constraints, it is the exact QP optimum
+        box_feasible = all(
+            a_v * v_clamped + a_omega * omega_clamped >= b - 1e-12
+            for a_v, a_omega, b in raw_cs
+        )
 
-        # Apply minimum-norm closed-form KKT gradient projection if constraint violated
-        v_opt = v_clamped
-        omega_opt = omega_clamped
-        kkt_slack = 0.0
+        if box_feasible:
+            v_final = v_clamped
+            omega_final = omega_clamped
+        else:
+            ok, (v_sol, omega_sol) = self._solve_2d_with_shift(
+                v_des,
+                omega_des,
+                self.v_min,
+                self.v_max,
+                -self.omega_max,
+                self.omega_max,
+                raw_cs,
+                0.0,
+            )
+            if ok:
+                v_final = v_sol
+                omega_final = omega_sol
+            else:
+                # Infeasible intersection: find minimum worst-case slack delta >= 0 inside box
+                d_hi = max(
+                    [0.0] + [b - (a_v * v_clamped + a_omega * omega_clamped) for a_v, a_omega, b in raw_cs]
+                ) * 1.01 + 1e-6
+                d_lo = 0.0
+                v_final, omega_final = v_clamped, omega_clamped
+                for _ in range(40):
+                    mid = 0.5 * (d_lo + d_hi)
+                    ok_m, (vm, wm) = self._solve_2d_with_shift(
+                        v_des,
+                        omega_des,
+                        self.v_min,
+                        self.v_max,
+                        -self.omega_max,
+                        self.omega_max,
+                        raw_cs,
+                        mid,
+                    )
+                    if ok_m:
+                        d_hi = mid
+                        v_final, omega_final = vm, wm
+                    else:
+                        d_lo = mid
 
-        if most_critical_constraint is not None:
-            a_v = most_critical_constraint["a_v"]
-            a_omega = most_critical_constraint["a_omega"]
-            b = most_critical_constraint["b"]
+        v_final = float(v_final)
+        omega_final = float(omega_final)
 
-            grad_norm_sq = a_v * a_v + a_omega * a_omega
-            if grad_norm_sq > 1e-8:
-                # Minimum norm projection: delta_u = lambda * a
-                # a_v*(v + lambda*a_v) + a_omega*(omega + lambda*a_omega) = b
-                # lambda = (b - lhs) / ||a||^2
-                lhs = a_v * v_clamped + a_omega * omega_clamped
-                lam = (b - lhs) / grad_norm_sq
-                v_opt = v_clamped + lam * a_v
-                omega_opt = omega_clamped + lam * a_omega
-                kkt_slack = float(most_critical_constraint["violation"])
+        # Verify actual satisfaction of all CBF inequalities and box bounds on returned command
+        max_violation = 0.0
+        for a_v, a_omega, b in raw_cs:
+            viol = b - (a_v * v_final + a_omega * omega_final)
+            if viol > max_violation:
+                max_violation = viol
 
-        # Re-enforce actuator saturation envelopes
-        v_final = max(self.v_min, min(self.v_max, v_opt))
-        omega_final = max(-self.omega_max, min(self.omega_max, omega_opt))
+        in_box = (
+            self.v_min - 1e-9 <= v_final <= self.v_max + 1e-9
+            and abs(omega_final) <= self.omega_max + 1e-9
+        )
+        forward_invariant = in_box and (max_violation <= 1e-6)
 
-        # Attenuation ratio: ||u_safe|| / (||u_ai|| + eps)
         norm_ai = math.hypot(v_des, omega_des)
         norm_safe = math.hypot(v_final, omega_final)
         attenuation = norm_safe / max(norm_ai, 1e-6)
@@ -174,13 +269,13 @@ class CBFSafetyFilter:
         latency_us = round((t_end - t_start) / 1000.0, 2)
 
         return {
-            "u_safe": (round(v_final, 4), round(omega_final, 4)),
-            "is_safe": min_h >= 0,
-            "forward_invariant": (most_critical_constraint is None) or (v_final != v_des or omega_final != omega_des),
+            "u_safe": (v_final, omega_final),
+            "is_safe": min_h >= 0.0,
+            "forward_invariant": forward_invariant,
             "min_barrier_h": round(min_h, 4),
             "attenuation_ratio": round(min(1.0, attenuation), 4),
             "solver_latency_us": latency_us,
-            "kkt_slack": round(kkt_slack, 4),
+            "kkt_slack": round(max_violation, 6),
         }
 
     def verify_trajectory(
